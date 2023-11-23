@@ -1,0 +1,372 @@
+---
+title: "Global TEWL"
+type: website
+editor: visual
+output-dir: docs
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Data Import, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+# Import Packages
+library(tidyverse)
+library(tidyr)
+library(readxl)
+library(broom)
+library(ggpubr)
+library(rstatix)
+
+#Import Data
+VapoMeter_Clean <- read_excel("VapoMeter Clean.xlsx", 
+    col_types = c("text", "text", "text", 
+        "text", "numeric", "text", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "text", "text", "numeric", "numeric", 
+        "numeric", "text", "text", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "text", "text", "text", "date", "date", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "text", "numeric"))
+
+VapoData = VapoMeter_Clean
+```
+
+```{r Data Prep, include=FALSE}
+
+# Create the Dif Variable in Wound - Contra
+
+VapoData$dif <- (VapoData$wound - VapoData$contra)
+VapoData$dif_five <- (VapoData$five_cm - VapoData$contra_five_cm)
+
+VapoData <- VapoData |> 
+  mutate(arm = ifelse(arm == "SF", "Placebo", arm)) |> 
+  mutate(arm = factor(arm, levels = c("Placebo", "Active")))
+```
+
+#### T-Tests 
+
+T-tests showed that there is a significant difference in the following.
+
+-   Wound TEWL when compared between Placebo and Active
+
+-   Wound TEWL and Contralateral TEWL
+
+-   The difference between wound TEWL and Contralateral TEWL between
+    Placebo and Active Groups.
+
+```{r T-Test, message=FALSE, warning=FALSE, paged.print=TRUE}
+# Perform the t-test
+t_test_result <- t.test(wound ~ arm, data = VapoData)
+# Perform a paired t-test
+Wound_Contra_T <- t.test(VapoData$wound, VapoData$contra)
+Wound_Contra_Dif_T <- t.test(dif ~ arm, data = VapoData)
+
+print(Wound_Contra_T)
+print(Wound_Contra_Dif_T)
+
+# Extract the p-value
+p_value <- t_test_result$p.value
+```
+
+### Graphs
+
+#### Healed Wound Site TEWL Box plots by Arms
+
+Was found to be significant between the means (p- 0.012)
+
+```{r Box plot wound, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+library(ggplot2)
+t_test_result <- t.test(wound ~ arm, data = VapoData)
+
+# Extract the p-value
+p_value <- t_test_result$p.value
+
+# Define the comparison you want to perform
+my_comparisons <- list(c("Active", "Placebo"))
+
+p <- ggboxplot(VapoData, x = "arm", y = "wound",
+               fill = "arm", palette = c("thistle", "slateblue1"),
+               xlab = "BAART Study Arm", ylab = "Healed Wound Site TEWL",
+               outlier.shape = NA, 
+               title = "Healed Wound Site TEWL Means Placebo vs Timolol") +
+  theme_minimal() +
+  theme(legend.position = "none") 
+whisker_heights <- tapply(VapoData$wound, VapoData$arm, function(x) {
+  return(boxplot.stats(x)$stats[5])
+})
+
+p <- p + stat_summary(fun = mean, geom = "text", aes(label = sprintf("%.2f", ..y..)), 
+                      position = position_dodge(width = 0.75), vjust = -0.5)
+
+max_whisker <- max(whisker_heights, na.rm = TRUE)
+p <- p + stat_compare_means(comparisons = my_comparisons, label = "p.signif", 
+                            label.y = max_whisker + 1) 
+p <- p + geom_text(aes(label = sprintf("p = %.3f", p_value), x = 1.5, y = max_whisker + 1))
+
+print(p)
+
+```
+
+```{r box plot dif, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+t_test_result <- t.test(dif ~ arm, data = VapoData)
+
+# Extract the p-value
+p_value <- t_test_result$p.value
+
+# Define the comparison you want to perform
+my_comparisons <- list(c("Active", "Placebo"))
+
+p <- ggboxplot(VapoData, x = "arm", y = "dif",
+               fill = "arm", palette = c("thistle", "slateblue1"),
+               xlab = "BAART Study Arm", ylab = "Difference between healed wound and contralateral TEWL",
+               outlier.shape = NA, 
+               title = "Difference in Wound vs Contralateral TEWL Means (Placebo vs Timolol)") +
+  theme_minimal() +
+  theme(legend.position = "none") 
+whisker_heights <- tapply(VapoData$dif, VapoData$arm, function(x) {
+  return(boxplot.stats(x)$stats[5])
+})
+
+p <- p + stat_summary(fun = mean, geom = "text", aes(label = sprintf("%.2f", ..y..)), 
+                      position = position_dodge(width = 0.75), vjust = -0.5)
+
+max_whisker <- max(whisker_heights, na.rm = TRUE)
+p <- p + stat_compare_means(comparisons = my_comparisons, label = "p.signif", 
+                            label.y = max_whisker + 1) 
+p <- p + geom_text(aes(label = sprintf("p = %.3f", p_value), x = 1.5, y = max_whisker + 1))
+
+print(p)
+
+```
+
+## Effect Plots
+
+```{r glm, message=FALSE, warning=FALSE, paged.print=TRUE}
+model <- glm(wound ~ 
+                days_since_healed +
+                arm +
+                dm_duration +
+                pet_owner +
+                contra +
+                bmi + 
+                arm_exposure_days +
+                hgba1c +
+                smoking +
+               charlson_comorbidity,
+             family = gaussian,
+            data = VapoData)
+summary(model)
+```
+
+```{r effect plot, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+# Create the model summary with broom
+model_summary <- tidy(model, conf.int = TRUE, conf.level = 0.95)
+
+# Rename columns for the model_summary data frame
+model_summary <- model_summary %>%
+  rename(
+    Variable = term,
+    Estimate = estimate,
+    `CI lower` = conf.low,
+    `CI upper` = conf.high,
+    `p-value` = p.value
+  )
+
+# Rename variables for readability
+model_summary <- model_summary %>%
+  mutate(Variable = case_when(
+    Variable == "armActive" ~ "Arm - Timolol",
+    Variable == "arm_exposure_days" ~ "Days in BAART",
+    Variable == "armSF" ~ "Arm - Screen Fail",
+    Variable == "thickness" ~ "Average Tissue Thickness (mm)",
+    Variable == "smoking2" ~ "Current Smoker",
+    Variable == "smoking1" ~ "Former Smoker",
+    Variable == "reulcerationY" ~ "Reulceration",
+    Variable == "pet_ownerY" ~ "Pet Owner",
+    Variable == "offloading2" ~ "Wheelchair Bound",
+    Variable == "offloading1" ~ "DME for Mobility",
+    Variable == "hgba1c" ~ "HgbA1c",
+    Variable == "dm_duration" ~ "Duration of DM",
+    Variable == "armPlacebo" ~ "Arm - Placebo",
+    Variable == "days_since_healed" ~ "Days After Healing",
+    Variable == "contra" ~ "Contralateral TEWL",
+    Variable == "charlson_comorbidity" ~ "Charlson Comorbidity Index",
+    Variable == "bmi" ~ "BMI",
+    Variable == "Visits_to_healed_total" ~ "Visits from BAART start to Healed",
+    TRUE ~ Variable
+  )) %>%
+  filter(Variable != "(Intercept)")
+
+# Effect Size Plot
+model_summary <- model_summary %>%
+  mutate(Significance = case_when(
+    `p-value` < .001 ~ '***',
+    `p-value` < .01 ~ '**',
+    `p-value` < .05 ~ '*',
+    TRUE ~ ''
+  ),y_position_asterisk = reorder(Variable, Estimate)) 
+
+# Create the effect size plot
+effect_size_plot <- ggplot(model_summary, aes(x = Estimate, y = y_position_asterisk)) +
+  geom_vline(xintercept = 0, linetype = "dotted", color = "grey") +
+ geom_point(aes(color = ifelse(`p-value` <= 0.05, "black", "grey")), size = 3) +
+  geom_errorbarh(aes(xmin = `CI lower`, xmax = `CI upper`, height = 0.2,
+                     color = ifelse(`p-value` <= 0.05, "black", "grey")), size = 0.5) +
+  geom_text(aes(x = `CI upper`, label = Significance), hjust = -1, vjust= 0.8, color = "black", size = 3.5) +
+  scale_color_manual(values = c("black", "grey"))+
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_blank(),
+    axis.text.y = element_text(size = 12),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(size = 12)
+  ) +
+  labs(
+    x = "TEWL Increase Estimate",
+    y = "",
+    title = "Forest Plot: Estimated Impact on Healed Wound TEWL"
+  ) + expand_limits(x = max(model_summary$`CI upper`, na.rm = TRUE) * 1.1)
+
+# Print the effect size plot
+print(effect_size_plot)
+  # Load necessary libraries
+library(knitr)
+library(kableExtra)
+
+# Order the model summary by the Estimate column from largest to smallest
+model_summary <- model_summary |> 
+  arrange(desc(Estimate)) |> 
+  select(c("Variable","Estimate", "CI lower", "CI upper", "p-value"))
+
+# Create the table with kable and add additional styling with kableExtra
+model_summary_table <- kable(model_summary, format = "html", digits = 3, col.names = c("Variable", "Estimate", "CI lower", "CI upper", "p-value")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+
+# Print the table
+model_summary_table
+```
+
+### Global TEWL Increase
+
+```{r tewl t, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+pearson_test <- cor.test(VapoData$wound, VapoData$contra, method = "pearson")
+# Assuming you have already conducted the Pearson correlation test and stored it in pearson_test
+summary(pearson_test)
+```
+
+For every increase of 1 in wound TEWL it is expected that the
+contralateral TEWL will increase by 0.3456 ( p = $2.2 * 10 ^{-16}$). The
+correlation between wound TEWL and wound TEWL is r = 0.532 with a p
+value of $2.18 * 10^{-28}$ . This lets us know that there is a
+moderately strong positive correlation that is significant between the
+two.
+
+Similarly, when comparing the TEWL from five cm from the wound to five
+cm from the contralateral site. It is expected that every increase of 1
+in the five cm away TEWL will increase the TEWL of the site 5 cm away
+from the contralateral site by 0.746 ( p-value $2 * 10^{-16}$ ). There
+was a moderatley strong positive correlation between them, r = 0.662 (
+p-value $5.15 * 10^ {-48}$ ).
+
+```{r TEWL corr, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+library(knitr)
+library(kableExtra)
+
+# Extract relevant information from pearson_test
+correlation_coefficient <- pearson_test$estimate
+degrees_of_freedom <- pearson_test$parameter
+t_statistic <- pearson_test$statistic
+p_value <- pearson_test$p.value
+confidence_interval <- pearson_test$conf.int
+
+# Create a data frame for the table
+table_data <- data.frame(
+  "Correlation Coefficient (r)" = correlation_coefficient,
+  "Degrees of Freedom" = degrees_of_freedom,
+  "T-Statistic" = t_statistic,
+  "P-Value" = p_value,
+  "95% Confidence Interval" = paste(confidence_interval, collapse = " - ")
+)
+
+# Create a table using kable
+table <- kable(table_data, format = "html", align = "c", caption = "Pearson Correlation Test Results") %>%
+  kable_styling(full_width = FALSE)
+
+# Print the table
+print(table)
+
+# Perform a linear regression analysis
+regression_model <- lm(contra ~ wound, data = VapoData)
+
+# Print a summary of the regression results
+summary(regression_model)
+
+pearson_test <- cor.test(VapoData$five_cm, VapoData$contra_five_cm, method = "pearson")
+summary(pearson_test)
+
+# Extract relevant information from pearson_test
+correlation_coefficient <- pearson_test$estimate
+degrees_of_freedom <- pearson_test$parameter
+t_statistic <- pearson_test$statistic
+p_value <- pearson_test$p.value
+confidence_interval <- pearson_test$conf.int
+
+# Create a data frame for the table
+table_data <- data.frame(
+  "Correlation Coefficient (r)" = correlation_coefficient,
+  "Degrees of Freedom" = degrees_of_freedom,
+  "T-Statistic" = t_statistic,
+  "P-Value" = p_value,
+  "95% Confidence Interval" = paste(confidence_interval, collapse = " - ")
+)
+
+# Create a table using kable
+table <- kable(table_data, format = "html", align = "c", caption = "Pearson Correlation Test Results") %>%
+  kable_styling(full_width = FALSE)
+
+# Print the table
+print(table)
+
+# Perform a linear regression analysis
+regression_model <- lm(five_cm ~ contra_five_cm, data = VapoData)
+
+# Print a summary of the regression results
+summary(regression_model)
+
+```
+
+#### Scatter Plots Wound x Contra TEWL
+
+```{r scatter plots, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+
+# Wound TEWL x Contra TEWL
+ggplot(VapoData) +
+ aes(x = wound, y = contra, colour = arm) +
+ geom_point(shape = "circle", size = 1.5) +
+ scale_color_hue(direction = 1) +
+ theme_minimal()+ 
+  labs(title = "Scatter - Wound TEWL x Contralateral TEWL")
+
+# Arm Facet - Wound x Contra TEWL
+ggplot(VapoData) +
+ aes(x = wound, y = contra, colour = arm) +
+ geom_point(shape = "circle", size = 1.5) +
+ scale_color_hue(direction = 1) +
+ theme_minimal() +
+ facet_wrap(vars(arm))+ 
+  labs(title = "Scatter Arm Facet - Wound x Contra TEWL")
+
+# Wound TEWL x 5 cm Away TEWL
+ggplot(VapoData) +
+ aes(x = wound, y = five_cm, colour = arm) +
+ geom_point(shape = "circle", size = 1.5) +
+ scale_color_hue(direction = 1) +
+ theme_minimal() +
+ facet_wrap(vars(arm))+ 
+  labs(title = "Scatter Arm Facet - Wound x 5 cm away TEWL")
+```
